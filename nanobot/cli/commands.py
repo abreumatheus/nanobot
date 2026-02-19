@@ -398,7 +398,7 @@ def gateway(
         workspace=config.workspace_path,
         on_heartbeat=on_heartbeat,
         interval_s=30 * 60,  # 30 minutes
-        enabled=True
+        enabled=False
     )
     
     # Create channel manager
@@ -413,12 +413,12 @@ def gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
-    console.print(f"[green]✓[/green] Heartbeat: every 30m")
+    console.print(f"[green]✓[/green] Heartbeat: off")
     
     async def run():
         try:
             await cron.start()
-            await heartbeat.start()
+            # await heartbeat.start()
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -427,7 +427,7 @@ def gateway(
             console.print("\nShutting down...")
         finally:
             await agent.close_mcp()
-            heartbeat.stop()
+            # heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
