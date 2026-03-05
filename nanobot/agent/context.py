@@ -5,6 +5,7 @@ import mimetypes
 import platform
 from pathlib import Path
 from typing import Any
+from loguru import logger
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
@@ -174,6 +175,8 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
                 continue
             b64 = base64.b64encode(p.read_bytes()).decode()
             images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            p.unlink(missing_ok=True)
+            logger.info(f"Deleted media file: {path}")
         
         if not images:
             return text

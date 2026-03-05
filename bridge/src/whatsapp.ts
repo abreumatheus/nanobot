@@ -9,6 +9,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
@@ -24,6 +25,10 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
+  image?: {
+    data: string;
+    mimetype: string;
+  };
 }
 
 export interface WhatsAppClientOptions {
@@ -37,13 +42,15 @@ export class WhatsAppClient {
   private sock: any = null;
   private options: WhatsAppClientOptions;
   private reconnecting = false;
+  private logger: any;
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
+    this.logger = pino({ level: 'silent' });
   }
 
   async connect(): Promise<void> {
-    const logger = pino({ level: 'silent' });
+    const logger = this.logger;
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
     const { version } = await fetchLatestBaileysVersion();
 
@@ -110,14 +117,12 @@ export class WhatsAppClient {
       if (type !== 'notify') return;
 
       for (const msg of messages) {
-        // Skip own messages
         if (msg.key.fromMe) continue;
-
-        // Skip status updates
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
         const content = this.extractMessageContent(msg);
-        if (!content) continue;
+        const image = await this.extractImageData(msg);
+        if (!content && !image) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
 
@@ -125,9 +130,10 @@ export class WhatsAppClient {
           id: msg.key.id || '',
           sender: msg.key.remoteJid || '',
           pn: msg.key.remoteJidAlt || '',
-          content,
+          content: content || '',
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          ...(image && { image }),
         });
       }
     });
@@ -147,9 +153,9 @@ export class WhatsAppClient {
       return message.extendedTextMessage.text;
     }
 
-    // Image with caption
-    if (message.imageMessage?.caption) {
-      return `[Image] ${message.imageMessage.caption}`;
+    // Image: return caption if present, empty string if image-only
+    if (message.imageMessage) {
+      return message.imageMessage.caption || '';
     }
 
     // Video with caption
@@ -168,6 +174,27 @@ export class WhatsAppClient {
     }
 
     return null;
+  }
+
+  private async extractImageData(msg: any): Promise<{ data: string; mimetype: string } | undefined> {
+    const message = msg.message;
+    if (!message?.imageMessage) return undefined;
+
+    try {
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+        logger: this.logger,
+        reuploadRequest: this.sock.updateMediaMessage,
+      });
+      const mimetype = message.imageMessage.mimetype || 'image/jpeg';
+      const data = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as any);
+      return {
+        data: data.toString('base64'),
+        mimetype,
+      };
+    } catch (error) {
+      console.error('Failed to download WhatsApp image:', error);
+      return undefined;
+    }
   }
 
   async sendMessage(to: string, text: string): Promise<void> {
